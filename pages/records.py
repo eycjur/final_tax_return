@@ -15,6 +15,7 @@ from components.common import create_summary_cards, get_year_selector
 from utils import calculations as calc
 from utils import database as db
 from utils import gemini
+from utils import storage
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ATTACHMENTS_DIR = os.path.join(BASE_DIR, 'attachments')
@@ -25,36 +26,39 @@ def create_record_form(record: Optional[dict] = None):
     record = record or {}
     clients = db.get_clients()
 
-    return dbc.Form([
+    return dbc.Form(id="record-form", children=[
         dbc.Row([
             dbc.Col([
-                dbc.Label("日付", html_for="input-date"),
+                dbc.Label(["日付", html.Span("*", className="text-danger ms-1")], html_for="input-date"),
                 dbc.Input(
                     type="date",
                     id="input-date",
-                    value=record.get('date', date.today().isoformat())
+                    value=record.get('date', date.today().isoformat()),
+                    required=True
                 )
             ], md=4),
             dbc.Col([
-                dbc.Label("種別", html_for="input-type"),
+                dbc.Label(["種別", html.Span("*", className="text-danger ms-1")], html_for="input-type"),
                 dbc.Select(
                     id="input-type",
                     options=[
                         {'label': '収入', 'value': 'income'},
                         {'label': '支出', 'value': 'expense'}
                     ],
-                    value=record.get('type', 'expense')
+                    value=record.get('type', 'expense'),
+                    required=True
                 )
             ], md=4),
             dbc.Col([
-                dbc.Label("カテゴリ", html_for="input-category"),
+                dbc.Label(["カテゴリ", html.Span("*", className="text-danger ms-1")], html_for="input-category"),
                 html.Div([
                     dbc.Input(
                         type="text",
                         id="input-category",
                         value=record.get('category', ''),
                         placeholder="選択または入力",
-                        list="category-datalist"
+                        list="category-datalist",
+                        required=True
                     ),
                     html.Datalist(id="category-datalist", children=[])
                 ])
@@ -109,12 +113,14 @@ def create_record_form(record: Optional[dict] = None):
                 )
             ], md=3),
             dbc.Col([
-                dbc.Label("金額", html_for="input-amount"),
+                dbc.Label(["金額", html.Span("*", className="text-danger ms-1")], html_for="input-amount"),
                 dbc.Input(
                     type="number",
                     id="input-amount",
                     value=record.get('amount_original', ''),
-                    placeholder="0"
+                    placeholder="0",
+                    required=True,
+                    min=0
                 )
             ], md=3),
             dbc.Col([
@@ -276,10 +282,17 @@ def layout():
                         ], id="btn-new-record", color="primary")
                     ], md=3),
                     dbc.Col([
-                        dbc.Button([
-                            html.I(className="fas fa-download me-2"),
-                            "CSV"
-                        ], id="btn-download-csv", color="secondary", outline=True)
+                        dbc.ButtonGroup([
+                            dbc.Button([
+                                html.I(className="fas fa-file-csv me-1"),
+                                "CSV"
+                            ], id="btn-download-csv", color="secondary", outline=True, size="sm"),
+                            dbc.Button([
+                                html.I(className="fas fa-file-archive me-1"),
+                                "添付"
+                            ], id="btn-download-attachments", color="secondary", outline=True, size="sm",
+                               title="添付ファイルを一括ダウンロード"),
+                        ])
                     ], md=3),
                 ], className="g-2")
             ], md=9),
@@ -362,6 +375,7 @@ def layout():
         ]),
 
         dcc.Download(id="download-csv"),
+        dcc.Download(id="download-attachments-zip"),
     ], fluid=True)
 
 
@@ -390,12 +404,21 @@ def get_form_modal():
      Output('records-table', 'style_table')],
     [Input('records-year', 'value'),
      Input('records-type-filter', 'value'),
-     Input('store-records-data', 'data')]
+     Input('store-records-data', 'data'),
+     Input('store-auth-session', 'data')]
 )
-def update_records_list(year, type_filter, _):
+def update_records_list(year, type_filter, _, auth_session):
     """Update records list and summary cards."""
     if not year:
         raise PreventUpdate
+
+    # Set user session for authenticated Supabase requests
+    if auth_session:
+        from utils.supabase_client import set_user_session
+        access_token = auth_session.get('access_token')
+        refresh_token = auth_session.get('refresh_token')
+        if access_token and refresh_token:
+            set_user_session(access_token, refresh_token)
 
     year = int(year)
 
@@ -423,12 +446,22 @@ def update_records_list(year, type_filter, _):
 
 @app.callback(
     Output('category-datalist', 'children'),
-    Input('input-type', 'value')
+    [Input('input-type', 'value'),
+     Input('store-auth-session', 'data')]
 )
-def update_category_options(record_type):
+def update_category_options(record_type, auth_session):
     """Update category datalist options based on record type."""
     if not record_type:
         return []
+
+    # Set user session for authenticated Supabase requests
+    if auth_session:
+        from utils.supabase_client import set_user_session
+        access_token = auth_session.get('access_token')
+        refresh_token = auth_session.get('refresh_token')
+        if access_token and refresh_token:
+            set_user_session(access_token, refresh_token)
+
     categories = db.get_categories(record_type)
     return [html.Option(value=c) for c in categories]
 
@@ -617,15 +650,26 @@ def toggle_form_modal(new_click, edit_click, dup_click, cancel_click,
      State('input-proration-rate', 'value'),
      State('store-edit-id', 'data'),
      State('store-attachment-data', 'data'),
-     State('store-attachment-name', 'data')],
+     State('store-attachment-name', 'data'),
+     State('store-auth-session', 'data')],
     prevent_initial_call=True
 )
 def save_record(n_clicks, date_val, record_type, category, client, description,
                 currency, amount, ttm, withholding, withholding_amount,
-                proration, proration_rate, edit_id, attachment_data, attachment_name):
+                proration, proration_rate, edit_id, attachment_data, attachment_name,
+                auth_session):
     """Save record to database and close modal."""
     if not n_clicks or not date_val or not record_type or not category or not amount:
         raise PreventUpdate
+
+    # Set user session for authenticated Supabase requests
+    if auth_session:
+        from utils.supabase_client import set_user_session
+        access_token = auth_session.get('access_token')
+        refresh_token = auth_session.get('refresh_token')
+        if access_token and refresh_token:
+            set_user_session(access_token, refresh_token)
+
     try:
         amount = float(amount)
         ttm = float(ttm) if ttm else None
@@ -703,13 +747,23 @@ def save_record(n_clicks, date_val, record_type, category, client, description,
      Output('toast-notification', 'header', allow_duplicate=True)],
     Input('btn-delete-selected', 'n_clicks'),
     [State('records-table', 'selected_rows'),
-     State('records-table', 'data')],
+     State('records-table', 'data'),
+     State('store-auth-session', 'data')],
     prevent_initial_call=True
 )
-def delete_records(n_clicks, selected_rows, table_data):
+def delete_records(n_clicks, selected_rows, table_data, auth_session):
     """Delete selected records."""
     if not n_clicks or not selected_rows or not table_data:
         raise PreventUpdate
+
+    # Set user session for authenticated Supabase requests
+    if auth_session:
+        from utils.supabase_client import set_user_session
+        access_token = auth_session.get('access_token')
+        refresh_token = auth_session.get('refresh_token')
+        if access_token and refresh_token:
+            set_user_session(access_token, refresh_token)
+
     deleted_count = 0
     for idx in selected_rows:
         record_id = table_data[idx].get('id')
@@ -721,15 +775,77 @@ def delete_records(n_clicks, selected_rows, table_data):
 @app.callback(
     Output('download-csv', 'data'),
     Input('btn-download-csv', 'n_clicks'),
-    State('records-year', 'value'),
+    [State('records-year', 'value'),
+     State('store-auth-session', 'data')],
     prevent_initial_call=True
 )
-def download_csv(n_clicks, year):
-    """Download records as CSV."""
+def download_csv(n_clicks, year, auth_session):
+    """Download records as raw CSV (all fields including attachment path)."""
     if not n_clicks or not year:
         raise PreventUpdate
-    csv_content = db.export_to_csv(int(year))
+
+    # Set user session for authenticated Supabase requests
+    if auth_session:
+        from utils.supabase_client import set_user_session
+        access_token = auth_session.get('access_token')
+        refresh_token = auth_session.get('refresh_token')
+        if access_token and refresh_token:
+            set_user_session(access_token, refresh_token)
+
+    csv_content = db.export_raw_records_to_csv(int(year))
     return dict(content=csv_content, filename=f"tax_records_{year}.csv")
+
+
+@app.callback(
+    [Output('download-attachments-zip', 'data'),
+     Output('toast-notification', 'children', allow_duplicate=True),
+     Output('toast-notification', 'is_open', allow_duplicate=True),
+     Output('toast-notification', 'header', allow_duplicate=True)],
+    Input('btn-download-attachments', 'n_clicks'),
+    [State('records-year', 'value'),
+     State('store-auth-session', 'data')],
+    prevent_initial_call=True
+)
+def download_attachments(n_clicks, year, auth_session):
+    """Download all attachments for the selected year as a ZIP file."""
+    if not n_clicks or not year:
+        raise PreventUpdate
+
+    # Set user session for authenticated Supabase requests
+    if auth_session:
+        from utils.supabase_client import set_user_session
+        access_token = auth_session.get('access_token')
+        refresh_token = auth_session.get('refresh_token')
+        if access_token and refresh_token:
+            set_user_session(access_token, refresh_token)
+
+    year = int(year)
+
+    # Get attachments with metadata for this year
+    attachments = db.get_attachments_with_metadata(year)
+
+    if not attachments:
+        return no_update, "この年度には添付ファイルがありません", True, "情報"
+
+    # Download and create ZIP (organized by month)
+    zip_data = storage.download_all_attachments_as_zip(year, attachments)
+
+    if not zip_data:
+        return no_update, "添付ファイルのダウンロードに失敗しました", True, "エラー"
+
+    # Encode as base64 for download
+    zip_base64 = base64.b64encode(zip_data).decode('utf-8')
+
+    return (
+        dict(
+            content=zip_base64,
+            filename=f"attachments_{year}.zip",
+            base64=True
+        ),
+        f"{len(attachments)}件の添付ファイルをダウンロードしました",
+        True,
+        "ダウンロード完了"
+    )
 
 
 @app.callback(
@@ -766,23 +882,22 @@ def handle_upload(contents, filename):
      Output('input-amount', 'value', allow_duplicate=True)],
     Input('btn-gemini', 'n_clicks'),
     [State('store-attachment-data', 'data'),
-     State('store-attachment-name', 'data'),
-     State('store-api-key', 'data')],
+     State('store-attachment-name', 'data')],
     prevent_initial_call=True
 )
-def process_with_gemini(n_clicks, attachment_data, attachment_name, api_key):
+def process_with_gemini(n_clicks, attachment_data, attachment_name):
     """Process attachment with Gemini API and auto-fill form fields."""
     # Default: no updates to form fields
     no_updates = [no_update] * 7
 
     if not n_clicks or not attachment_data or not attachment_name:
         return ["添付ファイルがありません"] + no_updates
-    if not api_key:
-        return ["APIキーが設定されていません（設定画面で保存してください）"] + no_updates
+    if not gemini.is_gemini_configured():
+        return ["APIキーが設定されていません（環境変数 GEMINI_API_KEY を設定してください）"] + no_updates
     try:
         _, content_string = attachment_data.split(',')
         decoded = base64.b64decode(content_string)
-        result = gemini.process_attachment(decoded, attachment_name, api_key)
+        result = gemini.process_attachment(decoded, attachment_name)
         if result.get('success'):
             # Extract values from Gemini result
             extracted_date = result.get('date') or no_update
@@ -812,3 +927,23 @@ def process_with_gemini(n_clicks, attachment_data, attachment_name, api_key):
             return [f"解析エラー: {result.get('error', '不明なエラー')}"] + no_updates
     except Exception as e:
         return [f"エラー: {str(e)}"] + no_updates
+
+
+# Clientside callback for form validation before save
+app.clientside_callback(
+    """
+    function(n_clicks) {
+        if (!n_clicks) return window.dash_clientside.no_update;
+
+        var form = document.getElementById('record-form');
+        if (form && !form.checkValidity()) {
+            form.reportValidity();
+            return window.dash_clientside.no_update;
+        }
+        return n_clicks;
+    }
+    """,
+    Output('btn-save', 'n_clicks'),
+    Input('btn-save', 'n_clicks'),
+    prevent_initial_call=True
+)

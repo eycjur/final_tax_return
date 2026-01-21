@@ -1,69 +1,53 @@
 """Gemini API utilities for automatic data extraction from receipts."""
 import os
 import json
-import base64
+import logging
 from typing import Optional
+
 from google import genai
 from google.genai import types
 from PIL import Image
-import io
+import io as std_io
+from dotenv import load_dotenv
+
+load_dotenv()
+
+logger = logging.getLogger(__name__)
+
+# Get API key from environment variable
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 
 
-# Encryption key (must match crypto.js)
-_ENCRYPTION_KEY = 'TaxReturnApp2024SecureObfuscation'
+def is_gemini_configured() -> bool:
+    """Check if Gemini API is properly configured."""
+    return bool(GEMINI_API_KEY)
 
 
-def _xor_cipher(data: str, key: str) -> str:
-    """XOR cipher for encryption/decryption."""
-    result = []
-    for i, char in enumerate(data):
-        key_char = key[i % len(key)]
-        result.append(chr(ord(char) ^ ord(key_char)))
-    return ''.join(result)
+def get_api_key() -> str:
+    """Get Gemini API key from environment variable."""
+    return GEMINI_API_KEY
 
 
-def decrypt_api_key(encrypted_key: str) -> str:
-    """
-    Decrypt an API key that was encrypted by crypto.js.
-
-    Args:
-        encrypted_key: Base64-encoded encrypted API key
-
-    Returns:
-        Decrypted API key, or empty string if decryption fails
-    """
-    if not encrypted_key:
-        return ''
-
-    try:
-        # Base64 decode
-        decoded = base64.b64decode(encrypted_key).decode('utf-8')
-        # XOR decrypt
-        return _xor_cipher(decoded, _ENCRYPTION_KEY)
-    except Exception:
-        # If decryption fails, assume it's already plain text (legacy)
-        return encrypted_key
-
-
-def extract_from_image(image_data: bytes, api_key: str) -> dict:
+def extract_from_image(image_data: bytes, api_key: Optional[str] = None) -> dict:
     """
     Extract receipt/invoice information from an image using Gemini.
 
     Args:
         image_data: Image file bytes
-        api_key: Gemini API key
+        api_key: Gemini API key (optional, uses env var if not provided)
 
     Returns:
         Dictionary with extracted fields
     """
-    if not api_key:
-        return {'error': 'Gemini APIキーが設定されていません', 'success': False}
+    key = api_key or GEMINI_API_KEY
+    if not key:
+        return {'error': 'Gemini APIキーが設定されていません（環境変数 GEMINI_API_KEY）', 'success': False}
 
     try:
-        client = genai.Client(api_key=api_key)
+        client = genai.Client(api_key=key)
 
         # 画像の MIME タイプを判定
-        image = Image.open(io.BytesIO(image_data))
+        image = Image.open(std_io.BytesIO(image_data))
         mime_type = 'image/jpeg'
         if image.format == 'PNG':
             mime_type = 'image/png'
@@ -115,6 +99,7 @@ def extract_from_image(image_data: bytes, api_key: str) -> dict:
             response_text = response.candidates[0].content.parts[0].text.strip()
         else:
             return {'error': f'予期しないレスポンス形式: {type(response)}', 'success': False}
+
         if response_text.startswith('```json'):
             response_text = response_text[7:]
         if response_text.startswith('```'):
@@ -137,23 +122,24 @@ def extract_from_image(image_data: bytes, api_key: str) -> dict:
     except json.JSONDecodeError as e:
         return {'error': f'JSON解析エラー: {str(e)}', 'success': False}
     except Exception as e:
-        import traceback
-        return {'error': f'Gemini API エラー: {str(e)}\n{traceback.format_exc()}', 'success': False}
+        logger.exception("Gemini API error")
+        return {'error': f'Gemini API エラー: {str(e)}', 'success': False}
 
 
-def extract_from_pdf(pdf_data: bytes, api_key: str) -> dict:
+def extract_from_pdf(pdf_data: bytes, api_key: Optional[str] = None) -> dict:
     """
     Extract receipt/invoice information from a PDF using Gemini.
 
     Args:
         pdf_data: PDF file bytes
-        api_key: Gemini API key
+        api_key: Gemini API key (optional, uses env var if not provided)
 
     Returns:
         Dictionary with extracted fields
     """
-    if not api_key:
-        return {'error': 'Gemini APIキーが設定されていません', 'success': False}
+    key = api_key or GEMINI_API_KEY
+    if not key:
+        return {'error': 'Gemini APIキーが設定されていません（環境変数 GEMINI_API_KEY）', 'success': False}
 
     tmp_path = None
     try:
@@ -176,7 +162,7 @@ def extract_from_pdf(pdf_data: bytes, api_key: str) -> dict:
         if not text_content.strip():
             return {'error': 'PDFからテキストを抽出できませんでした', 'success': False}
 
-        client = genai.Client(api_key=api_key)
+        client = genai.Client(api_key=key)
 
         prompt = f"""以下は領収書、請求書、または経費関連の書類から抽出したテキストです。
 以下の情報を抽出してJSON形式で返してください。
@@ -210,6 +196,7 @@ def extract_from_pdf(pdf_data: bytes, api_key: str) -> dict:
             response_text = response.candidates[0].content.parts[0].text.strip()
         else:
             return {'error': f'予期しないレスポンス形式: {type(response)}', 'success': False}
+
         if response_text.startswith('```json'):
             response_text = response_text[7:]
         if response_text.startswith('```'):
@@ -232,30 +219,26 @@ def extract_from_pdf(pdf_data: bytes, api_key: str) -> dict:
     except json.JSONDecodeError as e:
         return {'error': f'JSON解析エラー: {str(e)}', 'success': False}
     except Exception as e:
-        import traceback
-        return {'error': f'Gemini API エラー: {str(e)}\n{traceback.format_exc()}', 'success': False}
+        logger.exception("Gemini API error")
+        return {'error': f'Gemini API エラー: {str(e)}', 'success': False}
 
 
-def process_attachment(file_data: bytes, filename: str, api_key: str) -> dict:
+def process_attachment(file_data: bytes, filename: str) -> dict:
     """
     Process an attachment and extract information.
 
     Args:
         file_data: File bytes
         filename: Original filename
-        api_key: Gemini API key (may be encrypted)
 
     Returns:
         Dictionary with extracted fields
     """
-    # Decrypt API key if encrypted
-    decrypted_key = decrypt_api_key(api_key)
-
     ext = os.path.splitext(filename)[1].lower()
 
     if ext == '.pdf':
-        return extract_from_pdf(file_data, decrypted_key)
+        return extract_from_pdf(file_data)
     elif ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
-        return extract_from_image(file_data, decrypted_key)
+        return extract_from_image(file_data)
     else:
         return {'error': f'サポートされていないファイル形式: {ext}', 'success': False}

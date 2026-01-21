@@ -1,45 +1,35 @@
-"""Settings page - API keys and proration presets."""
+"""Settings page - User settings and configuration."""
 import dash_bootstrap_components as dbc
-from dash import html
+from dash import html, dcc
 from dash.dependencies import Input, Output, State
 from dash.exceptions import PreventUpdate
 
-from app import app
+from app import app, AUTH_ENABLED
 from utils import database as db
 
 
 def layout():
     """Create settings page layout."""
     return dbc.Container([
-        html.H4("設定", className="mb-4"),
-
-        dbc.Card([
-            dbc.CardHeader("Gemini API設定"),
-            dbc.CardBody([
-                dbc.Row([
-                    dbc.Col([
-                        dbc.Label("APIキー", html_for="input-api-key"),
-                        dbc.Input(
-                            type="password",
-                            id="input-api-key",
-                            placeholder="Gemini APIキーを入力"
-                        ),
-                        dbc.FormText("Google AI StudioでAPIキーを取得できます（ブラウザのlocalStorageに保存）"),
-                    ], md=8),
-                    dbc.Col([
-                        dbc.Label("　"),
-                        html.Div([
-                            dbc.Button("保存", id="btn-save-api-key", color="primary", n_clicks=0),
-                        ])
-                    ], md=4),
-                ]),
-                html.Div(id="api-key-status", className="mt-2")
-            ])
+        html.H4([
+            html.I(className="fas fa-cog me-2"),
+            "設定"
         ], className="mb-4"),
 
+        # Account section (shown when auth is enabled)
+        html.Div(id="settings-account-section"),
+
+        # Proration presets
         dbc.Card([
-            dbc.CardHeader("按分率プリセット"),
+            dbc.CardHeader([
+                html.I(className="fas fa-percentage me-2"),
+                "按分率プリセット"
+            ]),
             dbc.CardBody([
+                html.P(
+                    "経費の按分率のデフォルト値を設定できます。",
+                    className="text-muted mb-3"
+                ),
                 dbc.Row([
                     dbc.Col([
                         dbc.Label("家賃按分率 (%)"),
@@ -69,7 +59,10 @@ def layout():
                         )
                     ], md=4),
                 ], className="mb-3"),
-                dbc.Button("保存", id="btn-save-presets", color="primary"),
+                dbc.Button([
+                    html.I(className="fas fa-save me-2"),
+                    "保存"
+                ], id="btn-save-presets", color="primary"),
                 html.Div(id="preset-status", className="mt-2")
             ])
         ]),
@@ -77,18 +70,92 @@ def layout():
 
 
 @app.callback(
+    Output('settings-account-section', 'children'),
+    Input('store-auth-session', 'data')
+)
+def update_account_section(session):
+    """Update account section based on auth state."""
+    if not AUTH_ENABLED or not session:
+        return html.Div()
+
+    user = session.get('user', {})
+    name = user.get('name') or user.get('email', '')
+    email = user.get('email', '')
+    picture = user.get('picture', '')
+
+    return dbc.Card([
+        dbc.CardHeader([
+            html.I(className="fas fa-user me-2"),
+            "アカウント"
+        ]),
+        dbc.CardBody([
+            dbc.Row([
+                dbc.Col([
+                    html.Img(
+                        src=picture if picture else "https://www.gravatar.com/avatar/?d=mp",
+                        className="rounded-circle",
+                        height="64px",
+                        width="64px",
+                        style={"objectFit": "cover"}
+                    ),
+                ], width="auto"),
+                dbc.Col([
+                    html.H5(name, className="mb-1"),
+                    html.P(email, className="text-muted mb-0"),
+                ], className="d-flex flex-column justify-content-center"),
+                dbc.Col([
+                    dbc.Button([
+                        html.I(className="fas fa-sign-out-alt me-2"),
+                        "ログアウト"
+                    ], id="btn-settings-logout", color="outline-danger", size="sm")
+                ], width="auto", className="d-flex align-items-center"),
+            ], className="align-items-center"),
+        ])
+    ], className="mb-4")
+
+
+@app.callback(
     Output('preset-status', 'children'),
     Input('btn-save-presets', 'n_clicks'),
     [State('preset-rent-rate', 'value'),
      State('preset-comm-rate', 'value'),
-     State('preset-utility-rate', 'value')],
+     State('preset-utility-rate', 'value'),
+     State('store-auth-session', 'data')],
     prevent_initial_call=True
 )
-def save_presets(n_clicks, rent, comm, utility):
+def save_presets(n_clicks, rent, comm, utility, auth_session):
     """Save proration presets."""
     if not n_clicks:
         raise PreventUpdate
+
+    # Set user session for authenticated Supabase requests
+    if auth_session:
+        from utils.supabase_client import set_user_session
+        access_token = auth_session.get('access_token')
+        refresh_token = auth_session.get('refresh_token')
+        if access_token and refresh_token:
+            set_user_session(access_token, refresh_token)
+
     db.save_setting('preset_rent_rate', str(rent or 50))
     db.save_setting('preset_comm_rate', str(comm or 50))
     db.save_setting('preset_utility_rate', str(utility or 30))
-    return dbc.Alert("按分率を保存しました", color="success", duration=3000)
+    return dbc.Alert([
+        html.I(className="fas fa-check me-2"),
+        "按分率を保存しました"
+    ], color="success", duration=3000)
+
+
+# Logout button callback
+app.clientside_callback(
+    """
+    function(n_clicks) {
+        if (n_clicks > 0 && window.SupabaseAuth) {
+            window.SupabaseAuth.signOut();
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('btn-settings-logout', 'n_clicks'),
+    Input('btn-settings-logout', 'n_clicks'),
+    prevent_initial_call=True
+)

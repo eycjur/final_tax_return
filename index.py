@@ -1,27 +1,40 @@
 """Tax Return Record Application - Main entry point."""
-import dash_bootstrap_components as dbc
-from dash import dcc, html
-from dash.dependencies import Input, Output, State
+import json
 
-from app import app
+import dash_bootstrap_components as dbc
+from dash import dcc, html, Input, Output, State, clientside_callback
+
+from app import app, server, AUTH_ENABLED, SUPABASE_URL, SUPABASE_ANON_KEY
 from components.common import get_navbar
 
 # Import all pages to register their callbacks
-from pages import records, report, settings
+from pages import records, report, settings, login
 
 # Main layout
 app.layout = html.Div([
     dcc.Location(id='url', refresh=False),
 
+    # Auth session store (synced with Supabase JS client)
+    dcc.Store(id='store-auth-session', storage_type='local'),
+
     # Data stores
-    dcc.Store(id='store-api-key', storage_type='local'),
     dcc.Store(id='store-edit-id', storage_type='memory'),
     dcc.Store(id='store-attachment-data', storage_type='memory'),
     dcc.Store(id='store-attachment-name', storage_type='memory'),
     dcc.Store(id='store-records-data', storage_type='memory'),
 
-    # Navigation
-    get_navbar(),
+    # Supabase configuration (passed to JavaScript via data attributes)
+    html.Div(
+        id='supabase-config',
+        **{
+            'data-url': SUPABASE_URL,
+            'data-anon-key': SUPABASE_ANON_KEY,
+        },
+        style={'display': 'none'}
+    ) if AUTH_ENABLED else html.Div(),
+
+    # Navigation (hidden on login page)
+    html.Div(id='navbar-container'),
 
     # Main content area
     html.Div(id='page-content', className="container-fluid"),
@@ -42,13 +55,109 @@ app.layout = html.Div([
 ])
 
 
+# Navbar visibility callback
+@app.callback(
+    Output('navbar-container', 'children'),
+    [Input('url', 'pathname'),
+     Input('store-auth-session', 'data')]
+)
+def update_navbar(pathname, session):
+    """Show/hide navbar based on page and auth state."""
+    if AUTH_ENABLED:
+        # Hide navbar on login page
+        if pathname == '/login':
+            return html.Div()
+
+        # Show navbar only if authenticated
+        if not session:
+            return html.Div()
+
+    # Build navbar with user menu
+    nav_items = [
+        dbc.NavItem(dbc.NavLink("収支記録", href="/", active="exact")),
+        dbc.NavItem(dbc.NavLink("レポート", href="/report", active="exact")),
+    ]
+
+    # Create user menu if auth is enabled
+    user_menu = html.Div()
+    if AUTH_ENABLED and session:
+        user = session.get('user', {})
+        picture = user.get('picture') or "https://www.gravatar.com/avatar/?d=mp"
+
+        user_menu = dbc.DropdownMenu([
+            dbc.DropdownMenuItem([
+                html.I(className="fas fa-cog me-2"),
+                "設定"
+            ], href="/settings"),
+            dbc.DropdownMenuItem([
+                html.I(className="fas fa-sign-out-alt me-2"),
+                "ログアウト"
+            ], id="btn-navbar-logout", n_clicks=0),
+        ],
+            label=html.Img(
+                src=picture,
+                className="rounded-circle",
+                height="32px",
+                width="32px",
+                style={"objectFit": "cover"}
+            ),
+            toggle_style={"background": "transparent", "border": "none", "padding": "0"},
+            align_end=True,
+            className="ms-3"
+        )
+
+    return dbc.Navbar(
+        dbc.Container([
+            dbc.NavbarBrand([
+                html.I(className="fas fa-calculator me-2"),
+                "確定申告収支記録"
+            ], href="/", className="fs-5"),
+            dbc.Nav(nav_items, className="ms-auto", navbar=True),
+            user_menu,
+        ], fluid=True),
+        color="white",
+        className="mb-4"
+    )
+
+
+# Navbar logout callback
+app.clientside_callback(
+    """
+    function(n_clicks) {
+        if (n_clicks > 0 && window.SupabaseAuth) {
+            window.SupabaseAuth.signOut();
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('btn-navbar-logout', 'n_clicks'),
+    Input('btn-navbar-logout', 'n_clicks'),
+    prevent_initial_call=True
+)
+
+
 # Routing callback
 @app.callback(
     Output('page-content', 'children'),
-    Input('url', 'pathname')
+    [Input('url', 'pathname'),
+     Input('store-auth-session', 'data')]
 )
-def display_page(pathname):
+def display_page(pathname, session):
     """Route to appropriate page based on URL."""
+    # Check authentication if enabled
+    if AUTH_ENABLED:
+        if pathname == '/login':
+            if session:
+                # Already logged in, show user info
+                user = session.get('user', {})
+                return login.layout_logged_in(user)
+            return login.layout()
+
+        # Require login for all other pages
+        if not session:
+            return login.layout()
+
+    # Normal routing
     if pathname == '/report':
         return report.layout()
     elif pathname == '/settings':
@@ -56,50 +165,6 @@ def display_page(pathname):
     else:
         # Default to records page (including '/' and '/records')
         return records.layout()
-
-
-# API key clientside callback (for settings page)
-app.clientside_callback(
-    """
-    function(n_clicks, stored_key, api_key) {
-        var ctx = window.dash_clientside.callback_context;
-        var triggered = ctx.triggered[0];
-        var noUpdate = window.dash_clientside.no_update;
-
-        // トリガーを確認
-        var triggerId = triggered ? triggered.prop_id.split('.')[0] : '';
-        var triggerValue = triggered ? triggered.value : null;
-
-        // 保存ボタンがクリックされた場合（実際のクリックのみ）
-        if (triggerId === 'btn-save-api-key' && triggerValue && triggerValue > 0) {
-            // 空の場合は保存しない
-            if (!api_key || api_key.trim() === '') {
-                return [noUpdate, noUpdate, noUpdate, noUpdate];
-            }
-
-            // 暗号化して保存
-            var encrypted = window.CryptoUtils.encrypt(api_key);
-            return ['APIキーを保存しました', encrypted, '', '************（保存済み）'];
-        }
-
-        // store-api-keyが更新された場合、または初期ロード時
-        // 保存済みキーがあれば placeholder を更新
-        if (stored_key && stored_key.length > 0) {
-            return [noUpdate, noUpdate, '', '************（保存済み）'];
-        }
-
-        // キーが未保存の場合
-        return [noUpdate, noUpdate, '', 'Gemini APIキーを入力'];
-    }
-    """,
-    [Output('api-key-status', 'children'),
-     Output('store-api-key', 'data'),
-     Output('input-api-key', 'value'),
-     Output('input-api-key', 'placeholder')],
-    [Input('btn-save-api-key', 'n_clicks'),
-     Input('store-api-key', 'data')],
-    State('input-api-key', 'value')
-)
 
 
 # Camera functionality - clientside callbacks

@@ -28,3 +28,10 @@ AUTH_ENABLED = os.environ.get('AUTH_ENABLED', 'false').lower() == 'true'
 # Supabase configuration for client-side
 SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
 SUPABASE_ANON_KEY = os.environ.get('SUPABASE_ANON_KEY', '')
+
+
+def main():
+    """Entry point for the tax-app command."""
+    # Import index to register all callbacks before running
+    import index  # noqa: F401
+    app.run(debug=True)

@@ -1,0 +1,68 @@
+# =============================================================================
+# Docker ignore file for Cloud Run deployment
+# =============================================================================
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv
+venv
+ENV
+env
+.eggs
+*.egg-info
+*.egg
+.mypy_cache
+.pytest_cache
+.coverage
+htmlcov
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# Environment files (use Cloud Run secrets instead)
+.env
+.env.*
+!.env.example
+
+# Local data
+*.db
+*.sqlite
+*.sqlite3
+attachments/
+
+# Documentation
+*.md
+!README.md
+docs/
+
+# Test files
+tests/
+*_test.py
+test_*.py
+
+# Build artifacts
+dist/
+build/
+*.whl
+
+# Cloud Run / GCP
+.gcloudignore
+cloudbuild.yaml
+
+# Misc
+.DS_Store
+Thumbs.db
+*.log

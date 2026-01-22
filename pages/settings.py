@@ -6,6 +6,7 @@ from dash.exceptions import PreventUpdate
 
 from app import app, AUTH_ENABLED
 from utils import database as db
+from utils.supabase_client import ensure_session_from_auth_data
 
 
 def layout():
@@ -128,14 +129,7 @@ def save_presets(n_clicks, rent, comm, utility, auth_session):
     if not n_clicks:
         raise PreventUpdate
 
-    # Set user session for authenticated Supabase requests
-    if auth_session:
-        from utils.supabase_client import set_user_session
-        access_token = auth_session.get('access_token')
-        refresh_token = auth_session.get('refresh_token')
-        if access_token and refresh_token:
-            set_user_session(access_token, refresh_token)
-
+    ensure_session_from_auth_data(auth_session)
     db.save_setting('preset_rent_rate', str(rent or 50))
     db.save_setting('preset_comm_rate', str(comm or 50))
     db.save_setting('preset_utility_rate', str(utility or 30))

@@ -2,7 +2,7 @@
 from datetime import datetime
 
 import dash_bootstrap_components as dbc
-from dash import html, dcc
+from dash import html
 
 from app import AUTH_ENABLED
 from utils import calculations as calc

@@ -1,401 +1,30 @@
-"""Records page - CRUD operations for tax records."""
+"""Callbacks for the records page."""
 import base64
 import os
 from datetime import date, datetime
-from typing import Optional
 
-import dash_bootstrap_components as dbc
-import pandas as pd
-from dash import callback_context, dash_table, dcc, html, no_update
+from dash import callback_context, html, no_update
 from dash.dependencies import Input, Output, State
 from dash.exceptions import PreventUpdate
 
 from app import app
-from components.common import create_summary_cards, get_year_selector
+from components.common import create_summary_cards
 from utils import calculations as calc
 from utils import database as db
 from utils import gemini
 from utils import storage
+from utils import validation as valid
+from utils.supabase_client import ensure_session_from_auth_data
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from .form import create_record_form
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ATTACHMENTS_DIR = os.path.join(BASE_DIR, 'attachments')
 
 
-def create_record_form(record: Optional[dict] = None):
-    """Create the record input form."""
-    record = record or {}
-    clients = db.get_clients()
-
-    return dbc.Form(id="record-form", children=[
-        dbc.Row([
-            dbc.Col([
-                dbc.Label(["日付", html.Span("*", className="text-danger ms-1")], html_for="input-date"),
-                dbc.Input(
-                    type="date",
-                    id="input-date",
-                    value=record.get('date', date.today().isoformat()),
-                    required=True
-                )
-            ], md=4),
-            dbc.Col([
-                dbc.Label(["種別", html.Span("*", className="text-danger ms-1")], html_for="input-type"),
-                dbc.Select(
-                    id="input-type",
-                    options=[
-                        {'label': '収入', 'value': 'income'},
-                        {'label': '支出', 'value': 'expense'}
-                    ],
-                    value=record.get('type', 'expense'),
-                    required=True
-                )
-            ], md=4),
-            dbc.Col([
-                dbc.Label(["カテゴリ", html.Span("*", className="text-danger ms-1")], html_for="input-category"),
-                html.Div([
-                    dbc.Input(
-                        type="text",
-                        id="input-category",
-                        value=record.get('category', ''),
-                        placeholder="選択または入力",
-                        list="category-datalist",
-                        required=True
-                    ),
-                    html.Datalist(id="category-datalist", children=[])
-                ])
-            ], md=4),
-        ], className="mb-3"),
-
-        dbc.Row([
-            dbc.Col([
-                dbc.Label("取引先", html_for="input-client"),
-                html.Div([
-                    dbc.Input(
-                        type="text",
-                        id="input-client",
-                        value=record.get('client', ''),
-                        placeholder="選択または入力",
-                        list="client-datalist"
-                    ),
-                    html.Datalist(
-                        id="client-datalist",
-                        children=[html.Option(value=c) for c in clients]
-                    )
-                ])
-            ], md=6),
-            dbc.Col([
-                dbc.Label("摘要", html_for="input-description"),
-                html.Div([
-                    dbc.Input(
-                        type="text",
-                        id="input-description",
-                        value=record.get('description', ''),
-                        placeholder="内容の説明",
-                        list="description-datalist"
-                    ),
-                    html.Datalist(
-                        id="description-datalist",
-                        children=[html.Option(value=d) for d in db.get_descriptions()]
-                    )
-                ])
-            ], md=6),
-        ], className="mb-3"),
-
-        dbc.Row([
-            dbc.Col([
-                dbc.Label("通貨", html_for="input-currency"),
-                dbc.Select(
-                    id="input-currency",
-                    options=[
-                        {'label': '日本円 (JPY)', 'value': 'JPY'},
-                        {'label': '米ドル (USD)', 'value': 'USD'}
-                    ],
-                    value=record.get('currency', 'JPY')
-                )
-            ], md=3),
-            dbc.Col([
-                dbc.Label(["金額", html.Span("*", className="text-danger ms-1")], html_for="input-amount"),
-                dbc.Input(
-                    type="number",
-                    id="input-amount",
-                    value=record.get('amount_original', ''),
-                    placeholder="0",
-                    required=True,
-                    min=0
-                )
-            ], md=3),
-            dbc.Col([
-                dbc.Label("TTMレート", html_for="input-ttm"),
-                dbc.Input(
-                    type="number",
-                    id="input-ttm",
-                    value=record.get('ttm', ''),
-                    placeholder="例: 150.00",
-                    step="0.01",
-                    disabled=True
-                ),
-                html.Small(
-                    id="ttm-lookup-link",
-                    className="text-muted"
-                )
-            ], md=3),
-            dbc.Col([
-                dbc.Label("円換算額", html_for="display-jpy"),
-                dbc.Input(
-                    type="text",
-                    id="display-jpy",
-                    value='',
-                    disabled=True
-                )
-            ], md=3),
-        ], className="mb-3"),
-
-        dbc.Row([
-            dbc.Col([
-                dbc.Checkbox(
-                    id="input-withholding",
-                    label="源泉徴収あり",
-                    value=bool(record.get('withholding_tax', 0))
-                ),
-            ], md=3),
-            dbc.Col([
-                dbc.Label("源泉徴収額", html_for="input-withholding-amount"),
-                dbc.Input(
-                    type="number",
-                    id="input-withholding-amount",
-                    value=record.get('withholding_amount', ''),
-                    placeholder="自動計算または手入力",
-                    disabled=True
-                )
-            ], md=3),
-            dbc.Col([
-                dbc.Checkbox(
-                    id="input-proration",
-                    label="按分対象",
-                    value=bool(record.get('proration', 0))
-                ),
-            ], md=2),
-            dbc.Col([
-                dbc.Label("按分率 (%)", html_for="input-proration-rate"),
-                dbc.Input(
-                    type="number",
-                    id="input-proration-rate",
-                    value=record.get('proration_rate', 100),
-                    min=0,
-                    max=100,
-                    disabled=True
-                )
-            ], md=2),
-            dbc.Col([
-                dbc.Label("按分後金額", html_for="display-prorated"),
-                dbc.Input(
-                    type="text",
-                    id="display-prorated",
-                    value='',
-                    disabled=True
-                )
-            ], md=2),
-        ], className="mb-3"),
-
-        html.Hr(),
-
-        dbc.Row([
-            dbc.Col([
-                dbc.Label("添付ファイル"),
-                dcc.Upload(
-                    id="upload-file",
-                    children=html.Div([
-                        html.I(className="fas fa-cloud-upload-alt fa-2x mb-2"),
-                        html.Br(),
-                        "ファイルをドラッグ＆ドロップ",
-                        html.Br(),
-                        "またはクリックして選択",
-                        html.Br(),
-                        html.Small("(PDF, JPG, PNG)", className="text-muted")
-                    ], className="upload-area"),
-                    multiple=False,
-                    accept=".pdf,.jpg,.jpeg,.png"
-                ),
-                html.Div(id="upload-preview", className="mt-2"),
-            ], md=6),
-            dbc.Col([
-                dbc.Label("カメラで撮影"),
-                html.Div([
-                    html.Button([
-                        html.I(className="fas fa-camera me-2"),
-                        "カメラを起動"
-                    ], id="btn-camera", className="camera-btn mb-2"),
-                    html.Div(id="camera-container", style={'display': 'none'}, children=[
-                        html.Video(id="camera-video", autoPlay=True, style={'width': '100%', 'maxWidth': '400px', 'borderRadius': '8px'}),
-                        html.Br(),
-                        html.Button([
-                            html.I(className="fas fa-circle me-2"),
-                            "撮影"
-                        ], id="btn-capture", className="btn btn-danger mt-2 me-2"),
-                        html.Button([
-                            html.I(className="fas fa-times me-2"),
-                            "キャンセル"
-                        ], id="btn-camera-cancel", className="btn btn-secondary mt-2"),
-                    ]),
-                    html.Canvas(id="camera-canvas", style={'display': 'none'}),
-                    html.Div(id="camera-preview", className="mt-2"),
-                ]),
-            ], md=6),
-        ], className="mb-3"),
-
-        dbc.Row([
-            dbc.Col([
-                dbc.Button([
-                    html.I(className="fas fa-magic me-2"),
-                    "Geminiで自動入力"
-                ], id="btn-gemini", color="info", outline=True, className="me-2"),
-                dbc.Spinner(html.Span(id="gemini-status"), size="sm", color="info"),
-            ])
-        ]),
-    ])
-
-
-def layout():
-    """Create records list page layout with summary cards."""
-    return dbc.Container([
-        dbc.Row([
-            dbc.Col([
-                html.H4("収支記録", className="mb-0"),
-            ], md=3),
-            dbc.Col([
-                dbc.Row([
-                    dbc.Col([get_year_selector("records-year")], md=3),
-                    dbc.Col([
-                        dbc.Select(
-                            id="records-type-filter",
-                            options=[
-                                {'label': 'すべて', 'value': 'all'},
-                                {'label': '収入のみ', 'value': 'income'},
-                                {'label': '支出のみ', 'value': 'expense'}
-                            ],
-                            value='all'
-                        )
-                    ], md=3),
-                    dbc.Col([
-                        dbc.Button([
-                            html.I(className="fas fa-plus me-2"),
-                            "新規記録"
-                        ], id="btn-new-record", color="primary")
-                    ], md=3),
-                    dbc.Col([
-                        dbc.ButtonGroup([
-                            dbc.Button([
-                                html.I(className="fas fa-file-csv me-1"),
-                                "CSV"
-                            ], id="btn-download-csv", color="secondary", outline=True, size="sm"),
-                            dbc.Button([
-                                html.I(className="fas fa-file-archive me-1"),
-                                "添付"
-                            ], id="btn-download-attachments", color="secondary", outline=True, size="sm",
-                               title="添付ファイルを一括ダウンロード"),
-                        ])
-                    ], md=3),
-                ], className="g-2")
-            ], md=9),
-        ], className="mb-4 align-items-center"),
-
-        # Summary cards
-        html.Div(id="records-summary"),
-
-        dbc.Row([
-            dbc.Col([
-                dbc.ButtonGroup([
-                    dbc.Button([
-                        html.I(className="fas fa-edit me-1"),
-                        "編集"
-                    ], id="btn-edit-selected", color="primary", outline=True, size="sm"),
-                    dbc.Button([
-                        html.I(className="fas fa-copy me-1"),
-                        "複製"
-                    ], id="btn-duplicate-selected", color="info", outline=True, size="sm"),
-                    dbc.Button([
-                        html.I(className="fas fa-trash me-1"),
-                        "削除"
-                    ], id="btn-delete-selected", color="danger", outline=True, size="sm"),
-                ], className="mb-3")
-            ])
-        ]),
-
-        dbc.Card([
-            dbc.CardBody([
-                # Empty state message (shown when no records)
-                html.Div(
-                    id="records-empty-state",
-                    children=[
-                        html.I(className="fas fa-inbox fa-3x text-muted mb-3"),
-                        html.P("記録がありません", className="text-muted")
-                    ],
-                    className="text-center py-5",
-                    style={'display': 'none'}
-                ),
-                # DataTable (always present)
-                dash_table.DataTable(
-                    id='records-table',
-                    columns=[
-                        {'name': '日付', 'id': 'date'},
-                        {'name': '種別', 'id': 'type_display'},
-                        {'name': 'カテゴリ', 'id': 'category'},
-                        {'name': '取引先', 'id': 'client'},
-                        {'name': '摘要', 'id': 'description'},
-                        {'name': '金額', 'id': 'amount_display'},
-                        {'name': '按分後', 'id': 'prorated_display'},
-                    ],
-                    data=[],
-                    row_selectable='multi',
-                    selected_rows=[],
-                    page_size=20,
-                    style_table={'overflowX': 'auto'},
-                    style_cell={
-                        'textAlign': 'left',
-                        'padding': '12px',
-                        'fontSize': '14px'
-                    },
-                    style_header={
-                        'backgroundColor': '#f1f5f9',
-                        'fontWeight': '600',
-                        'color': '#64748b'
-                    },
-                    style_data_conditional=[
-                        {
-                            'if': {'filter_query': '{type} = income'},
-                            'backgroundColor': '#f0fdf4'
-                        },
-                        {
-                            'if': {'filter_query': '{type} = expense'},
-                            'backgroundColor': '#fef2f2'
-                        }
-                    ],
-                    style_as_list_view=True,
-                ),
-            ])
-        ]),
-
-        dcc.Download(id="download-csv"),
-        dcc.Download(id="download-attachments-zip"),
-    ], fluid=True)
-
-
-def get_form_modal():
-    """Create the record form modal."""
-    return dbc.Modal([
-        dbc.ModalHeader(dbc.ModalTitle(id="modal-title")),
-        dbc.ModalBody(id="modal-body"),
-        dbc.ModalFooter([
-            dbc.Button([
-                html.I(className="fas fa-save me-2"),
-                "保存"
-            ], id="btn-save", color="primary", className="me-2"),
-            dbc.Button([
-                html.I(className="fas fa-times me-2"),
-                "キャンセル"
-            ], id="btn-cancel", color="secondary", outline=True, n_clicks=0),
-        ]),
-    ], id="form-modal", size="xl", is_open=False, backdrop="static")
-
+# =============================================================================
+# Records List Callbacks
+# =============================================================================
 
 @app.callback(
     [Output('records-summary', 'children'),
@@ -412,14 +41,7 @@ def update_records_list(year, type_filter, _, auth_session):
     if not year:
         raise PreventUpdate
 
-    # Set user session for authenticated Supabase requests
-    if auth_session:
-        from utils.supabase_client import set_user_session
-        access_token = auth_session.get('access_token')
-        refresh_token = auth_session.get('refresh_token')
-        if access_token and refresh_token:
-            set_user_session(access_token, refresh_token)
-
+    ensure_session_from_auth_data(auth_session)
     year = int(year)
 
     # Get summary for the year (always show full summary regardless of filter)
@@ -444,6 +66,10 @@ def update_records_list(year, type_filter, _, auth_session):
     return summary_cards, df.to_dict('records'), {'display': 'none'}, {'overflowX': 'auto'}
 
 
+# =============================================================================
+# Category Callbacks
+# =============================================================================
+
 @app.callback(
     Output('category-datalist', 'children'),
     [Input('input-type', 'value'),
@@ -454,17 +80,14 @@ def update_category_options(record_type, auth_session):
     if not record_type:
         return []
 
-    # Set user session for authenticated Supabase requests
-    if auth_session:
-        from utils.supabase_client import set_user_session
-        access_token = auth_session.get('access_token')
-        refresh_token = auth_session.get('refresh_token')
-        if access_token and refresh_token:
-            set_user_session(access_token, refresh_token)
-
+    ensure_session_from_auth_data(auth_session)
     categories = db.get_categories(record_type)
     return [html.Option(value=c) for c in categories]
 
+
+# =============================================================================
+# Currency & Calculation Callbacks
+# =============================================================================
 
 @app.callback(
     [Output('input-ttm', 'disabled'),
@@ -580,6 +203,10 @@ def toggle_proration(proration, category):
     return False, int(rate)
 
 
+# =============================================================================
+# Modal Callbacks
+# =============================================================================
+
 @app.callback(
     [Output('form-modal', 'is_open'),
      Output('modal-title', 'children'),
@@ -628,6 +255,10 @@ def toggle_form_modal(new_click, edit_click, dup_click, cancel_click,
     raise PreventUpdate
 
 
+# =============================================================================
+# CRUD Callbacks
+# =============================================================================
+
 @app.callback(
     [Output('store-records-data', 'data'),
      Output('toast-notification', 'children'),
@@ -662,32 +293,33 @@ def save_record(n_clicks, date_val, record_type, category, client, description,
     if not n_clicks or not date_val or not record_type or not category or not amount:
         raise PreventUpdate
 
-    # Set user session for authenticated Supabase requests
-    if auth_session:
-        from utils.supabase_client import set_user_session
-        access_token = auth_session.get('access_token')
-        refresh_token = auth_session.get('refresh_token')
-        if access_token and refresh_token:
-            set_user_session(access_token, refresh_token)
+    ensure_session_from_auth_data(auth_session)
 
     try:
-        amount = float(amount)
+        # Validate and sanitize all inputs
+        date_val = valid.validate_date(date_val)
+        record_type = valid.validate_record_type(record_type)
+        category = valid.sanitize_category(category)
+        client = valid.sanitize_client(client)
+        description = valid.sanitize_description(description)
+        currency = valid.validate_currency(currency)
+        amount = valid.validate_amount(amount, "金額")
+
         ttm = float(ttm) if ttm else None
         if currency == 'USD' and ttm:
             amount_jpy = calc.calculate_jpy_amount(amount, currency, ttm)
         else:
             amount_jpy = amount
-        proration_rate = float(proration_rate) if proration_rate else 100
+        proration_rate_val = valid.validate_rate(proration_rate, "按分率") if proration_rate else 100
         if proration:
-            amount_prorated = calc.calculate_prorated_amount(amount_jpy, proration_rate)
+            amount_prorated = calc.calculate_prorated_amount(amount_jpy, proration_rate_val)
         else:
             amount_prorated = amount_jpy
         attachment_path = None
         if attachment_data and attachment_name:
             ALLOWED_EXTENSIONS = {'.pdf', '.jpg', '.jpeg', '.png'}
-            ext = os.path.splitext(attachment_name)[1].lower()
-            if ext not in ALLOWED_EXTENSIONS:
-                raise ValueError(f"許可されていないファイル形式: {ext}")
+            attachment_name = valid.validate_filename(attachment_name)
+            ext = valid.validate_file_extension(attachment_name, ALLOWED_EXTENSIONS)
             fiscal_year = calc.get_fiscal_year(date_val)
             year_dir = os.path.join(ATTACHMENTS_DIR, str(fiscal_year))
             os.makedirs(year_dir, exist_ok=True)
@@ -701,22 +333,22 @@ def save_record(n_clicks, date_val, record_type, category, client, description,
             with open(file_path, 'wb') as f:
                 f.write(decoded)
             attachment_path = f"{fiscal_year}/{safe_name}"
-        category = category.strip()
+        # Add category if new (category is already sanitized)
         db.add_category(record_type, category)
         record = {
             'date': date_val,
             'type': record_type,
             'category': category,
-            'client': client or '',
-            'description': description or '',
+            'client': client,
+            'description': description,
             'currency': currency,
             'amount_original': amount,
             'ttm': ttm,
             'amount_jpy': amount_jpy,
-            'withholding_tax': 1 if withholding else 0,
+            'withholding_tax': bool(withholding),
             'withholding_amount': float(withholding_amount) if withholding_amount else 0,
-            'proration': 1 if proration else 0,
-            'proration_rate': proration_rate,
+            'proration': bool(proration),
+            'proration_rate': proration_rate_val,
             'amount_prorated': amount_prorated,
             'attachment_path': attachment_path,
             'fiscal_year': calc.get_fiscal_year(date_val)
@@ -729,7 +361,7 @@ def save_record(n_clicks, date_val, record_type, category, client, description,
             message = "記録を保存しました"
         # 保存成功時：テーブル更新、トースト表示、モーダルを閉じる
         return datetime.now().isoformat(), message, True, "成功", False, None
-    except ValueError as e:
+    except (ValueError, valid.ValidationError) as e:
         # バリデーションエラー時：モーダルは開いたまま
         return no_update, f"入力エラー: {str(e)}", True, "入力エラー", no_update, no_update
     except IOError:
@@ -756,13 +388,7 @@ def delete_records(n_clicks, selected_rows, table_data, auth_session):
     if not n_clicks or not selected_rows or not table_data:
         raise PreventUpdate
 
-    # Set user session for authenticated Supabase requests
-    if auth_session:
-        from utils.supabase_client import set_user_session
-        access_token = auth_session.get('access_token')
-        refresh_token = auth_session.get('refresh_token')
-        if access_token and refresh_token:
-            set_user_session(access_token, refresh_token)
+    ensure_session_from_auth_data(auth_session)
 
     deleted_count = 0
     for idx in selected_rows:
@@ -771,6 +397,10 @@ def delete_records(n_clicks, selected_rows, table_data, auth_session):
             deleted_count += 1
     return datetime.now().isoformat(), f"{deleted_count}件の記録を削除しました", True, "削除完了"
 
+
+# =============================================================================
+# Export Callbacks
+# =============================================================================
 
 @app.callback(
     Output('download-csv', 'data'),
@@ -784,14 +414,7 @@ def download_csv(n_clicks, year, auth_session):
     if not n_clicks or not year:
         raise PreventUpdate
 
-    # Set user session for authenticated Supabase requests
-    if auth_session:
-        from utils.supabase_client import set_user_session
-        access_token = auth_session.get('access_token')
-        refresh_token = auth_session.get('refresh_token')
-        if access_token and refresh_token:
-            set_user_session(access_token, refresh_token)
-
+    ensure_session_from_auth_data(auth_session)
     csv_content = db.export_raw_records_to_csv(int(year))
     return dict(content=csv_content, filename=f"tax_records_{year}.csv")
 
@@ -811,14 +434,7 @@ def download_attachments(n_clicks, year, auth_session):
     if not n_clicks or not year:
         raise PreventUpdate
 
-    # Set user session for authenticated Supabase requests
-    if auth_session:
-        from utils.supabase_client import set_user_session
-        access_token = auth_session.get('access_token')
-        refresh_token = auth_session.get('refresh_token')
-        if access_token and refresh_token:
-            set_user_session(access_token, refresh_token)
-
+    ensure_session_from_auth_data(auth_session)
     year = int(year)
 
     # Get attachments with metadata for this year
@@ -848,6 +464,10 @@ def download_attachments(n_clicks, year, auth_session):
     )
 
 
+# =============================================================================
+# File Upload Callbacks
+# =============================================================================
+
 @app.callback(
     [Output('upload-preview', 'children'),
      Output('store-attachment-data', 'data'),
@@ -870,6 +490,10 @@ def handle_upload(contents, filename):
         preview = html.Img(src=contents, className="preview-image")
     return preview, contents, filename
 
+
+# =============================================================================
+# Gemini AI Callbacks
+# =============================================================================
 
 @app.callback(
     [Output('gemini-status', 'children'),
@@ -928,6 +552,10 @@ def process_with_gemini(n_clicks, attachment_data, attachment_name):
     except Exception as e:
         return [f"エラー: {str(e)}"] + no_updates
 
+
+# =============================================================================
+# Clientside Callback for Form Validation
+# =============================================================================
 
 # Clientside callback for form validation before save
 app.clientside_callback(

@@ -90,3 +90,29 @@ def sign_out():
         client.auth.sign_out()
     except Exception as e:
         logger.warning(f"Error during sign out: {e}")
+
+
+def ensure_session_from_auth_data(auth_session: Optional[dict]) -> bool:
+    """Set user session from Dash auth session data if available.
+
+    This helper function extracts access_token and refresh_token from the
+    auth_session dict (from dcc.Store) and sets the Supabase session.
+
+    Args:
+        auth_session: Dict containing 'access_token' and 'refresh_token' keys,
+                      or None if not authenticated.
+
+    Returns:
+        True if session was set successfully, False otherwise.
+    """
+    if not auth_session:
+        return False
+
+    access_token = auth_session.get('access_token')
+    refresh_token = auth_session.get('refresh_token')
+
+    if access_token and refresh_token:
+        set_user_session(access_token, refresh_token)
+        return True
+
+    return False

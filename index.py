@@ -1,11 +1,12 @@
 """Tax Return Record Application - Main entry point."""
-import json
-
 import dash_bootstrap_components as dbc
-from dash import dcc, html, Input, Output, State, clientside_callback
+from dash import dcc, html, Input, Output
 
 from app import app, server, AUTH_ENABLED, SUPABASE_URL, SUPABASE_ANON_KEY
-from components.common import get_navbar
+
+# server is the Flask instance used by Gunicorn for production deployment
+# Usage: gunicorn index:server
+__all__ = ['app', 'server']
 
 # Import all pages to register their callbacks
 from pages import records, report, settings, login

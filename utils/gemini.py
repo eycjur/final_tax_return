@@ -1,14 +1,13 @@
 """Gemini API utilities for automatic data extraction from receipts."""
-import os
+import io as std_io
 import json
 import logging
-from typing import Optional
+import os
 
+from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 from PIL import Image
-import io as std_io
-from dotenv import load_dotenv
 
 load_dotenv()
 
@@ -28,7 +27,7 @@ def get_api_key() -> str:
     return GEMINI_API_KEY
 
 
-def extract_from_image(image_data: bytes, api_key: Optional[str] = None) -> dict:
+def extract_from_image(image_data: bytes, api_key: str | None = None) -> dict:
     """
     Extract receipt/invoice information from an image using Gemini.
 
@@ -126,7 +125,7 @@ def extract_from_image(image_data: bytes, api_key: Optional[str] = None) -> dict
         return {'error': f'Gemini API エラー: {str(e)}', 'success': False}
 
 
-def extract_from_pdf(pdf_data: bytes, api_key: Optional[str] = None) -> dict:
+def extract_from_pdf(pdf_data: bytes, api_key: str | None = None) -> dict:
     """
     Extract receipt/invoice information from a PDF using Gemini.
 
@@ -143,8 +142,9 @@ def extract_from_pdf(pdf_data: bytes, api_key: Optional[str] = None) -> dict:
 
     tmp_path = None
     try:
-        from PyPDF2 import PdfReader
         import tempfile
+
+        from PyPDF2 import PdfReader
 
         with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
             tmp.write(pdf_data)

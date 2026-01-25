@@ -1,10 +1,9 @@
 """Database utilities for the tax return application using Supabase."""
 import logging
-from typing import Optional
 
 import pandas as pd
 
-from utils.supabase_client import get_supabase_client, get_current_user_id
+from utils.supabase_client import get_current_user_id, get_supabase_client
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +157,7 @@ def get_clients() -> list:
             .execute()
 
         # Get unique values
-        clients = list(set(row['client'] for row in response.data if row['client']))
+        clients = list({row['client'] for row in response.data if row['client']})
         return sorted(clients)
     except Exception as e:
         logger.error(f"Error getting clients: {e}")
@@ -188,7 +187,7 @@ def get_descriptions(limit: int = 50) -> list:
 
 # ===== Record CRUD Functions =====
 
-def save_record(record: dict) -> Optional[str]:
+def save_record(record: dict) -> str | None:
     """Save a new record to the database."""
     try:
         client = _get_client()
@@ -282,7 +281,7 @@ def delete_record(record_id: str) -> bool:
         return False
 
 
-def get_record(record_id: str) -> Optional[dict]:
+def get_record(record_id: str) -> dict | None:
     """Get a single record by ID."""
     try:
         client = _get_client()
@@ -298,11 +297,11 @@ def get_record(record_id: str) -> Optional[dict]:
         return None
 
 
-def get_records(fiscal_year: Optional[int] = None,
-                record_type: Optional[str] = None,
-                category: Optional[str] = None,
-                start_date: Optional[str] = None,
-                end_date: Optional[str] = None) -> pd.DataFrame:
+def get_records(fiscal_year: int | None = None,
+                record_type: str | None = None,
+                category: str | None = None,
+                start_date: str | None = None,
+                end_date: str | None = None) -> pd.DataFrame:
     """Get records with optional filters.
 
     Note: Row Level Security (RLS) automatically filters by user_id.

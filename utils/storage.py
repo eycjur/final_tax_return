@@ -1,13 +1,12 @@
 """Supabase Storage utilities for file uploads."""
 import io
-import os
 import logging
+import os
+import uuid
 import zipfile
 from datetime import datetime
-from typing import Optional
-import uuid
 
-from utils.supabase_client import get_supabase_client, get_current_user_id
+from utils.supabase_client import get_current_user_id, get_supabase_client
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +14,7 @@ logger = logging.getLogger(__name__)
 BUCKET_NAME = 'attachments'
 
 
-def upload_file(file_data: bytes, filename: str, fiscal_year: int) -> Optional[str]:
+def upload_file(file_data: bytes, filename: str, fiscal_year: int) -> str | None:
     """Upload a file to Supabase Storage.
 
     Args:
@@ -54,13 +53,13 @@ def upload_file(file_data: bytes, filename: str, fiscal_year: int) -> Optional[s
             content_type = 'image/gif'
 
         # Upload to Supabase Storage
-        response = client.storage.from_(BUCKET_NAME).upload(
+        client.storage.from_(BUCKET_NAME).upload(
             path=storage_path,
             file=file_data,
-            file_options={"content-type": content_type}
+            file_options={'content-type': content_type},
         )
 
-        logger.info(f"File uploaded: {storage_path}")
+        logger.info(f'File uploaded: {storage_path}')
         return storage_path
 
     except Exception as e:
@@ -68,7 +67,7 @@ def upload_file(file_data: bytes, filename: str, fiscal_year: int) -> Optional[s
         return None
 
 
-def get_file_url(storage_path: str, expires_in: int = 3600) -> Optional[str]:
+def get_file_url(storage_path: str, expires_in: int = 3600) -> str | None:
     """Get a signed URL for a file in Supabase Storage.
 
     Args:
@@ -114,14 +113,13 @@ def delete_file(storage_path: str) -> bool:
 
     try:
         client = get_supabase_client()
+        client.storage.from_(BUCKET_NAME).remove([storage_path])
 
-        response = client.storage.from_(BUCKET_NAME).remove([storage_path])
-
-        logger.info(f"File deleted: {storage_path}")
+        logger.info(f'File deleted: {storage_path}')
         return True
 
     except Exception as e:
-        logger.error(f"Error deleting file: {e}")
+        logger.error(f'Error deleting file: {e}')
         return False
 
 
@@ -152,7 +150,7 @@ def list_files(fiscal_year: int) -> list:
         return []
 
 
-def download_file(storage_path: str) -> Optional[bytes]:
+def download_file(storage_path: str) -> bytes | None:
     """Download a file from Supabase Storage.
 
     Args:
@@ -174,7 +172,7 @@ def download_file(storage_path: str) -> Optional[bytes]:
         return None
 
 
-def download_all_attachments_as_zip(fiscal_year: int, attachments: list) -> Optional[bytes]:
+def download_all_attachments_as_zip(fiscal_year: int, attachments: list) -> bytes | None:
     """Download all attachments for a fiscal year as a ZIP file.
 
     Files are organized by month (YYYY-MM/) with descriptive filenames.

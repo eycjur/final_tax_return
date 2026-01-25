@@ -5,7 +5,6 @@ to prevent XSS and other input-related vulnerabilities.
 """
 import html
 import re
-from typing import Optional
 
 # Maximum lengths for various fields
 MAX_CATEGORY_LENGTH = 50
@@ -20,7 +19,7 @@ class ValidationError(ValueError):
     pass
 
 
-def sanitize_text(text: Optional[str], max_length: int = 500, field_name: str = "フィールド") -> str:
+def sanitize_text(text: str | None, max_length: int = 500, field_name: str = "フィールド") -> str:
     """Sanitize text input by escaping HTML and limiting length.
 
     Args:
@@ -50,7 +49,7 @@ def sanitize_text(text: Optional[str], max_length: int = 500, field_name: str = 
     return text
 
 
-def sanitize_category(category: Optional[str]) -> str:
+def sanitize_category(category: str | None) -> str:
     """Sanitize category input.
 
     Args:
@@ -68,7 +67,7 @@ def sanitize_category(category: Optional[str]) -> str:
     return sanitize_text(category, MAX_CATEGORY_LENGTH, "カテゴリ")
 
 
-def sanitize_client(client: Optional[str]) -> str:
+def sanitize_client(client: str | None) -> str:
     """Sanitize client name input.
 
     Args:
@@ -80,7 +79,7 @@ def sanitize_client(client: Optional[str]) -> str:
     return sanitize_text(client, MAX_CLIENT_LENGTH, "取引先")
 
 
-def sanitize_description(description: Optional[str]) -> str:
+def sanitize_description(description: str | None) -> str:
     """Sanitize description input.
 
     Args:
@@ -144,7 +143,7 @@ def validate_amount(amount, field_name: str = "金額") -> float:
     try:
         amount = float(amount)
     except (TypeError, ValueError):
-        raise ValidationError(f"{field_name}は数値で入力してください")
+        raise ValidationError(f'{field_name}は数値で入力してください') from None
 
     if amount < 0:
         raise ValidationError(f"{field_name}は0以上の値を入力してください")
@@ -168,7 +167,7 @@ def validate_rate(rate, field_name: str = "率") -> float:
     try:
         rate = float(rate)
     except (TypeError, ValueError):
-        raise ValidationError(f"{field_name}は数値で入力してください")
+        raise ValidationError(f'{field_name}は数値で入力してください') from None
 
     if rate < 0 or rate > 100:
         raise ValidationError(f"{field_name}は0〜100の範囲で入力してください")
@@ -176,7 +175,7 @@ def validate_rate(rate, field_name: str = "率") -> float:
     return rate
 
 
-def validate_date(date_str: Optional[str]) -> str:
+def validate_date(date_str: str | None) -> str:
     """Validate date string format (YYYY-MM-DD).
 
     Args:
@@ -197,10 +196,11 @@ def validate_date(date_str: Optional[str]) -> str:
 
     # Parse to validate actual date
     from datetime import datetime
+
     try:
         datetime.strptime(date_str, '%Y-%m-%d')
     except ValueError:
-        raise ValidationError("無効な日付です")
+        raise ValidationError('無効な日付です') from None
 
     return date_str
 

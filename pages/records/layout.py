@@ -2,10 +2,7 @@
 import dash_bootstrap_components as dbc
 from dash import dash_table, dcc, html
 
-from components.common import create_summary_cards, get_year_selector
-from utils import calculations as calc
-
-from .form import create_record_form
+from components.common import get_year_selector
 
 
 def layout():

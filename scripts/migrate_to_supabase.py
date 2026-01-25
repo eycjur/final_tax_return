@@ -9,24 +9,23 @@ SQLiteデータをSupabaseに移行するスクリプト
 注意: サービスロールキーはRLSをバイパスするため、管理者権限が必要です。
 """
 import os
-import sys
 import sqlite3
+import sys
 from pathlib import Path
-from datetime import datetime
 
 # プロジェクトルートをパスに追加
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dotenv import load_dotenv
+
 from supabase import create_client
+from utils.constants import ATTACHMENTS_DIR, SQLITE_DB_PATH
 
 load_dotenv()
 
 # 設定
 SUPABASE_URL = os.environ.get('SUPABASE_URL')
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get('SUPABASE_SERVICE_KEY')
-SQLITE_DB_PATH = Path(__file__).parent.parent / 'data' / 'tax_records.db'
-ATTACHMENTS_DIR = Path(__file__).parent.parent / 'attachments'
 
 # 移行対象のユーザーID
 TARGET_USER_ID = '9f3c11bb-0cec-4d3c-bdf0-ab5af86d15e2'
@@ -54,6 +53,8 @@ def get_sqlite_connection():
 
 def get_supabase_client():
     """Supabaseクライアントを取得（サービスロールキー使用）"""
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        raise ValueError('SUPABASE_URL and SUPABASE_SERVICE_KEY must be set')
     return create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 
@@ -79,7 +80,7 @@ def migrate_categories(sqlite_conn, supabase):
         return 0
 
     # 既存のカテゴリを削除
-    print(f"既存のカテゴリを削除中...")
+    print("既存のカテゴリを削除中...")
     supabase.table('categories').delete().eq('user_id', TARGET_USER_ID).execute()
 
     # 新しいカテゴリを挿入
@@ -114,7 +115,7 @@ def migrate_settings(sqlite_conn, supabase):
         return 0
 
     # 既存の設定を削除
-    print(f"既存の設定を削除中...")
+    print("既存の設定を削除中...")
     supabase.table('settings').delete().eq('user_id', TARGET_USER_ID).execute()
 
     # 新しい設定を挿入
@@ -143,11 +144,10 @@ def migrate_records(sqlite_conn, supabase):
     records_data = []
     for row in rows:
         # attachment_pathの形式を変更: 2025/filename.pdf → user_id/2025/filename.pdf
+        # すでにuser_idが含まれている場合はそのまま、そうでなければuser_idを追加
         attachment_path = row[14]
-        if attachment_path:
-            # すでにuser_idが含まれている場合はそのまま、そうでなければuser_idを追加
-            if not attachment_path.startswith(TARGET_USER_ID):
-                attachment_path = f"{TARGET_USER_ID}/{attachment_path}"
+        if attachment_path and not attachment_path.startswith(TARGET_USER_ID):
+            attachment_path = f'{TARGET_USER_ID}/{attachment_path}'
 
         records_data.append({
             'user_id': TARGET_USER_ID,
@@ -174,7 +174,7 @@ def migrate_records(sqlite_conn, supabase):
         return 0
 
     # 既存のレコードを削除
-    print(f"既存のレコードを削除中...")
+    print("既存のレコードを削除中...")
     supabase.table('records').delete().eq('user_id', TARGET_USER_ID).execute()
 
     # 新しいレコードを挿入

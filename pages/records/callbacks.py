@@ -11,16 +11,12 @@ from app import app
 from components.common import create_summary_cards
 from utils import calculations as calc
 from utils import database as db
-from utils import gemini
-from utils import storage
+from utils import gemini, storage
 from utils import validation as valid
+from utils.constants import ATTACHMENTS_DIR
 from utils.supabase_client import ensure_session_from_auth_data
 
 from .form import create_record_form
-
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-ATTACHMENTS_DIR = os.path.join(BASE_DIR, 'attachments')
-
 
 # =============================================================================
 # Records List Callbacks
@@ -321,10 +317,10 @@ def save_record(n_clicks, date_val, record_type, category, client, description,
             attachment_name = valid.validate_filename(attachment_name)
             ext = valid.validate_file_extension(attachment_name, ALLOWED_EXTENSIONS)
             fiscal_year = calc.get_fiscal_year(date_val)
-            year_dir = os.path.join(ATTACHMENTS_DIR, str(fiscal_year))
-            os.makedirs(year_dir, exist_ok=True)
+            year_dir = ATTACHMENTS_DIR / str(fiscal_year)
+            year_dir.mkdir(parents=True, exist_ok=True)
             safe_name = f"{date_val}_{record_type}_{datetime.now().strftime('%H%M%S')}{ext}"
-            file_path = os.path.join(year_dir, safe_name)
+            file_path = year_dir / safe_name
             _, content_string = attachment_data.split(',')
             decoded = base64.b64decode(content_string)
             MAX_FILE_SIZE = 10 * 1024 * 1024
@@ -364,7 +360,7 @@ def save_record(n_clicks, date_val, record_type, category, client, description,
     except (ValueError, valid.ValidationError) as e:
         # バリデーションエラー時：モーダルは開いたまま
         return no_update, f"入力エラー: {str(e)}", True, "入力エラー", no_update, no_update
-    except IOError:
+    except OSError:
         return no_update, "ファイルの保存に失敗しました", True, "ファイルエラー", no_update, no_update
     except Exception:
         import logging
@@ -416,7 +412,7 @@ def download_csv(n_clicks, year, auth_session):
 
     ensure_session_from_auth_data(auth_session)
     csv_content = db.export_raw_records_to_csv(int(year))
-    return dict(content=csv_content, filename=f"tax_records_{year}.csv")
+    return {'content': csv_content, 'filename': f'tax_records_{year}.csv'}
 
 
 @app.callback(
@@ -453,14 +449,14 @@ def download_attachments(n_clicks, year, auth_session):
     zip_base64 = base64.b64encode(zip_data).decode('utf-8')
 
     return (
-        dict(
-            content=zip_base64,
-            filename=f"attachments_{year}.zip",
-            base64=True
-        ),
-        f"{len(attachments)}件の添付ファイルをダウンロードしました",
+        {
+            'content': zip_base64,
+            'filename': f'attachments_{year}.zip',
+            'base64': True,
+        },
+        f'{len(attachments)}件の添付ファイルをダウンロードしました',
         True,
-        "ダウンロード完了"
+        'ダウンロード完了',
     )
 
 

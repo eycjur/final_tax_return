@@ -1,6 +1,5 @@
 """Record form component for tax records."""
 from datetime import date
-from typing import Optional
 
 import dash_bootstrap_components as dbc
 from dash import dcc, html
@@ -8,7 +7,7 @@ from dash import dcc, html
 from utils import database as db
 
 
-def create_record_form(record: Optional[dict] = None):
+def create_record_form(record: dict | None = None):
     """Create the record input form.
 
     Args:

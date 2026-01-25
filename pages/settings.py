@@ -1,10 +1,10 @@
 """Settings page - User settings and configuration."""
 import dash_bootstrap_components as dbc
-from dash import html, dcc
+from dash import html
 from dash.dependencies import Input, Output, State
 from dash.exceptions import PreventUpdate
 
-from app import app, AUTH_ENABLED
+from app import AUTH_ENABLED, app
 from utils import database as db
 from utils.supabase_client import ensure_session_from_auth_data
 

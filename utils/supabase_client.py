@@ -1,11 +1,11 @@
 """Supabase client configuration and utilities."""
-import os
 import logging
+import os
 from functools import lru_cache
-from typing import Optional
 
-from supabase import create_client, Client
 from dotenv import load_dotenv
+
+from supabase import Client, create_client
 
 load_dotenv()
 
@@ -57,7 +57,7 @@ def set_user_session(access_token: str, refresh_token: str):
     client.auth.set_session(access_token, refresh_token)
 
 
-def get_current_user() -> Optional[dict]:
+def get_current_user() -> dict | None:
     """Get the current authenticated user."""
     try:
         client = get_supabase_client()
@@ -74,7 +74,7 @@ def get_current_user() -> Optional[dict]:
     return None
 
 
-def get_current_user_id() -> Optional[str]:
+def get_current_user_id() -> str | None:
     """Get the current authenticated user's ID."""
     user = get_current_user()
     return user['id'] if user else None
@@ -92,7 +92,7 @@ def sign_out():
         logger.warning(f"Error during sign out: {e}")
 
 
-def ensure_session_from_auth_data(auth_session: Optional[dict]) -> bool:
+def ensure_session_from_auth_data(auth_session: dict | None) -> bool:
     """Set user session from Dash auth session data if available.
 
     This helper function extracts access_token and refresh_token from the

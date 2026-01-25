@@ -6,10 +6,9 @@ It is split into:
 - form.py: Record input form component
 - callbacks.py: All Dash callbacks for the page
 """
-from .layout import layout, get_form_modal
-from .form import create_record_form
-
 # Import callbacks to register them with the app
 from . import callbacks  # noqa: F401
+from .form import create_record_form
+from .layout import get_form_modal, layout
 
 __all__ = ['layout', 'get_form_modal', 'create_record_form']

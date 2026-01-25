@@ -1,6 +1,6 @@
 """Login page for Supabase authentication."""
 import dash_bootstrap_components as dbc
-from dash import html, Input, Output, clientside_callback
+from dash import Input, Output, html
 
 from app import app
 

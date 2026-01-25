@@ -120,4 +120,4 @@ def download_report_csv(n_clicks, year):
     if not n_clicks or not year:
         raise PreventUpdate
     csv_content = db.export_to_csv(int(year))
-    return dict(content=csv_content, filename=f"tax_report_{year}.csv")
+    return {'content': csv_content, 'filename': f'tax_report_{year}.csv'}

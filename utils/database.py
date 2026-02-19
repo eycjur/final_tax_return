@@ -199,6 +199,7 @@ def save_record(record: dict) -> str | None:
             'type': record['type'],
             'category': record['category'],
             'client': record.get('client', ''),
+            'client_address': record.get('client_address', ''),
             'description': record.get('description', ''),
             'currency': record.get('currency', 'JPY'),
             'amount_original': record['amount_original'],
@@ -235,6 +236,7 @@ def update_record(record_id: str, record: dict) -> bool:
             'type': record['type'],
             'category': record['category'],
             'client': record.get('client', ''),
+            'client_address': record.get('client_address', ''),
             'description': record.get('description', ''),
             'currency': record.get('currency', 'JPY'),
             'amount_original': record['amount_original'],
@@ -419,7 +421,7 @@ def get_client_summary(fiscal_year: int) -> pd.DataFrame:
         client = _get_client()
 
         response = client.table('records') \
-            .select('client, amount_jpy, withholding_amount') \
+            .select('client, client_address, amount_jpy, withholding_amount') \
             .eq('fiscal_year', fiscal_year) \
             .eq('type', 'income') \
             .neq('client', '') \
@@ -430,10 +432,12 @@ def get_client_summary(fiscal_year: int) -> pd.DataFrame:
 
         df = pd.DataFrame(response.data)
 
+        # Group by client and get the first address for each client
         summary = df.groupby('client').agg(
             count=('client', 'size'),
             total_income=('amount_jpy', 'sum'),
-            total_withholding=('withholding_amount', 'sum')
+            total_withholding=('withholding_amount', 'sum'),
+            client_address=('client_address', 'first')  # Get first address for each client
         ).reset_index()
 
         return summary.sort_values('total_income', ascending=False)

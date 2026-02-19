@@ -8,7 +8,7 @@ from dash.dependencies import Input, Output, State
 from dash.exceptions import PreventUpdate
 
 from app import app
-from components.common import create_summary_cards
+from components.common import CURRENT_YEAR, create_summary_cards
 from utils import calculations as calc
 from utils import database as db
 from utils import gemini, storage
@@ -17,6 +17,43 @@ from utils.constants import ATTACHMENTS_DIR
 from utils.supabase_client import ensure_session_from_auth_data
 
 from .form import create_record_form
+
+# =============================================================================
+# Year Selection Callbacks
+# =============================================================================
+
+@app.callback(
+    Output('store-records-year', 'data'),
+    Input('records-year', 'value'),
+    prevent_initial_call=True
+)
+def save_records_year(year):
+    """Save selected year to localStorage."""
+    if year:
+        return {'year': int(year)}
+    return None
+
+
+@app.callback(
+    Output('records-year', 'value'),
+    Input('url', 'pathname'),
+    [State('store-records-year', 'data'),
+     State('records-year', 'value')]
+)
+def restore_records_year(pathname, stored_data, current_value):
+    """Restore last selected year when page loads."""
+    # Only restore when navigating to records page (not report page)
+    if pathname == '/report':
+        raise PreventUpdate
+
+    # If there's stored data, use it; otherwise use current value or default
+    if stored_data and stored_data.get('year'):
+        return stored_data['year']
+    elif current_value:
+        return current_value
+    else:
+        return CURRENT_YEAR
+
 
 # =============================================================================
 # Records List Callbacks
@@ -199,6 +236,8 @@ def toggle_proration(proration, category):
     return False, int(rate)
 
 
+
+
 # =============================================================================
 # Modal Callbacks
 # =============================================================================
@@ -209,16 +248,15 @@ def toggle_proration(proration, category):
      Output('modal-body', 'children'),
      Output('store-edit-id', 'data')],
     [Input('btn-new-record', 'n_clicks'),
-     Input('btn-edit-selected', 'n_clicks'),
-     Input('btn-duplicate-selected', 'n_clicks'),
-     Input('btn-cancel', 'n_clicks')],
-    [State('records-table', 'selected_rows'),
-     State('records-table', 'data'),
+     Input('records-table', 'active_cell'),
+     Input('btn-cancel', 'n_clicks'),
+     Input('btn-duplicate', 'n_clicks')],
+    [State('records-table', 'data'),
+     State('store-edit-id', 'data'),
      State('form-modal', 'is_open')],
     prevent_initial_call=True
 )
-def toggle_form_modal(new_click, edit_click, dup_click, cancel_click,
-                      selected_rows, table_data, _is_open):
+def toggle_form_modal(new_click, active_cell, cancel_click, duplicate_click, table_data, edit_id, _is_open):
     """Toggle record form modal (open/cancel only, save is handled separately)."""
     ctx = callback_context
     if not ctx.triggered:
@@ -228,26 +266,25 @@ def toggle_form_modal(new_click, edit_click, dup_click, cancel_click,
     trigger_id = triggered['prop_id'].split('.')[0]
     trigger_value = triggered['value']
 
-    # Ignore initial render (when n_clicks is None or 0)
-    if not trigger_value:
-        raise PreventUpdate
-
     if trigger_id == 'btn-cancel':
         return False, '', '', None
-    if trigger_id == 'btn-new-record':
+    if trigger_id == 'btn-new-record' and trigger_value:
         return True, '新規記録', create_record_form(), None
-    if trigger_id == 'btn-edit-selected' and selected_rows and table_data:
-        record_data = table_data[selected_rows[0]]
-        record = db.get_record(record_data.get('id'))
+    if trigger_id == 'btn-duplicate' and edit_id:
+        # 現在編集中の記録を複製
+        record = db.get_record(edit_id)
         if record:
-            return True, '記録を編集', create_record_form(record), record.get('id')
-    if trigger_id == 'btn-duplicate-selected' and selected_rows and table_data:
-        record_data = table_data[selected_rows[0]]
-        record = db.get_record(record_data.get('id'))
-        if record:
+            # IDを削除して新しい記録として作成
             record['id'] = None
             record['date'] = date.today().isoformat()
             return True, '記録を複製', create_record_form(record), None
+    if trigger_id == 'records-table' and active_cell and table_data:
+        row_idx = active_cell['row']
+        if row_idx < len(table_data):
+            record_data = table_data[row_idx]
+            record = db.get_record(record_data.get('id'))
+            if record:
+                return True, '記録を編集', create_record_form(record), record.get('id')
     raise PreventUpdate
 
 
@@ -267,6 +304,7 @@ def toggle_form_modal(new_click, edit_click, dup_click, cancel_click,
      State('input-type', 'value'),
      State('input-category', 'value'),
      State('input-client', 'value'),
+     State('input-client-address', 'value'),
      State('input-description', 'value'),
      State('input-currency', 'value'),
      State('input-amount', 'value'),
@@ -281,7 +319,7 @@ def toggle_form_modal(new_click, edit_click, dup_click, cancel_click,
      State('store-auth-session', 'data')],
     prevent_initial_call=True
 )
-def save_record(n_clicks, date_val, record_type, category, client, description,
+def save_record(n_clicks, date_val, record_type, category, client, client_address, description,
                 currency, amount, ttm, withholding, withholding_amount,
                 proration, proration_rate, edit_id, attachment_data, attachment_name,
                 auth_session):
@@ -331,11 +369,14 @@ def save_record(n_clicks, date_val, record_type, category, client, description,
             attachment_path = f"{fiscal_year}/{safe_name}"
         # Add category if new (category is already sanitized)
         db.add_category(record_type, category)
+
+        # 業務該当はレポート画面で自動判定するため、ここでは保存しない
         record = {
             'date': date_val,
             'type': record_type,
             'category': category,
             'client': client,
+            'client_address': client_address or '',
             'description': description,
             'currency': currency,
             'amount_original': amount,
@@ -379,7 +420,7 @@ def save_record(n_clicks, date_val, record_type, category, client, description,
      State('store-auth-session', 'data')],
     prevent_initial_call=True
 )
-def delete_records(n_clicks, selected_rows, table_data, auth_session):
+def delete_selected_records(n_clicks, selected_rows, table_data, auth_session):
     """Delete selected records."""
     if not n_clicks or not selected_rows or not table_data:
         raise PreventUpdate
@@ -391,7 +432,11 @@ def delete_records(n_clicks, selected_rows, table_data, auth_session):
         record_id = table_data[idx].get('id')
         if record_id and db.delete_record(record_id):
             deleted_count += 1
-    return datetime.now().isoformat(), f"{deleted_count}件の記録を削除しました", True, "削除完了"
+
+    if deleted_count > 0:
+        return datetime.now().isoformat(), f"{deleted_count}件の記録を削除しました", True, "削除完了"
+    else:
+        return no_update, "削除に失敗しました", True, "エラー"
 
 
 # =============================================================================
@@ -497,6 +542,7 @@ def handle_upload(contents, filename):
      Output('input-type', 'value', allow_duplicate=True),
      Output('input-category', 'value', allow_duplicate=True),
      Output('input-client', 'value', allow_duplicate=True),
+     Output('input-client-address', 'value', allow_duplicate=True),
      Output('input-description', 'value', allow_duplicate=True),
      Output('input-currency', 'value', allow_duplicate=True),
      Output('input-amount', 'value', allow_duplicate=True)],
@@ -508,7 +554,7 @@ def handle_upload(contents, filename):
 def process_with_gemini(n_clicks, attachment_data, attachment_name):
     """Process attachment with Gemini API and auto-fill form fields."""
     # Default: no updates to form fields
-    no_updates = [no_update] * 7
+    no_updates = [no_update] * 8
 
     if not n_clicks or not attachment_data or not attachment_name:
         return ["添付ファイルがありません"] + no_updates
@@ -524,6 +570,7 @@ def process_with_gemini(n_clicks, attachment_data, attachment_name):
             extracted_type = result.get('type') or no_update
             extracted_category = result.get('category') or no_update
             extracted_client = result.get('client') or no_update
+            extracted_client_address = result.get('client_address') or no_update
             extracted_description = result.get('description') or no_update
             extracted_currency = result.get('currency') or no_update
             extracted_amount = result.get('amount') or no_update
@@ -539,6 +586,7 @@ def process_with_gemini(n_clicks, attachment_data, attachment_name):
                 extracted_type,
                 extracted_category,
                 extracted_client,
+                extracted_client_address,
                 extracted_description,
                 extracted_currency,
                 extracted_amount

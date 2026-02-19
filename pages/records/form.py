@@ -76,6 +76,18 @@ def create_record_form(record: dict | None = None):
                 ])
             ], md=6),
             dbc.Col([
+                dbc.Label("所在地", html_for="input-client-address"),
+                dbc.Input(
+                    type="text",
+                    id="input-client-address",
+                    value=record.get('client_address', ''),
+                    placeholder="事業者の所在地を入力"
+                )
+            ], md=6),
+        ], className="mb-3"),
+
+        dbc.Row([
+            dbc.Col([
                 dbc.Label("摘要", html_for="input-description"),
                 html.Div([
                     dbc.Input(

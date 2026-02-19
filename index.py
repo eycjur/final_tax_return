@@ -18,6 +18,10 @@ app.layout = html.Div([
     # Auth session store (synced with Supabase JS client)
     dcc.Store(id='store-auth-session', storage_type='local'),
 
+    # Year selection stores (persist last selected year)
+    dcc.Store(id='store-report-year', storage_type='local'),
+    dcc.Store(id='store-records-year', storage_type='local'),
+
     # Data stores
     dcc.Store(id='store-edit-id', storage_type='memory'),
     dcc.Store(id='store-attachment-data', storage_type='memory'),

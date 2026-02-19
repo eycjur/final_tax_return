@@ -66,6 +66,7 @@ def extract_from_image(image_data: bytes, api_key: str | None = None) -> dict:
 - amount: 金額 (数値のみ、カンマなし)
 - currency: 通貨 ("JPY" または "USD")
 - client: 発行元/取引先名
+- client_address: 取引先の所在地（都道府県、市区町村、番地など、記載されている場合は抽出、不明な場合はnull）
 - description: 内容/摘要
 - category: 推測されるカテゴリ（以下から選択）
   - 収入の場合: "報酬", "給与", "その他収入"
@@ -80,6 +81,7 @@ def extract_from_image(image_data: bytes, api_key: str | None = None) -> dict:
   "amount": 5500,
   "currency": "JPY",
   "client": "Amazon.co.jp",
+  "client_address": "東京都千代田区神田神保町1-1-1",
   "description": "書籍購入",
   "category": "新聞図書費",
   "type": "expense"
@@ -87,7 +89,7 @@ def extract_from_image(image_data: bytes, api_key: str | None = None) -> dict:
 """
 
         response = client.models.generate_content(
-            model='gemini-2.0-flash-exp',
+            model='gemini-2.5-flash',
             contents=[prompt, image_part]
         )
 
@@ -175,6 +177,7 @@ def extract_from_pdf(pdf_data: bytes, api_key: str | None = None) -> dict:
 - amount: 金額 (数値のみ、カンマなし)
 - currency: 通貨 ("JPY" または "USD")
 - client: 発行元/取引先名
+- client_address: 取引先の所在地（都道府県、市区町村、番地など、記載されている場合は抽出、不明な場合はnull）
 - description: 内容/摘要
 - category: 推測されるカテゴリ（以下から選択）
   - 収入の場合: "報酬", "給与", "その他収入"
@@ -185,7 +188,7 @@ def extract_from_pdf(pdf_data: bytes, api_key: str | None = None) -> dict:
 """
 
         response = client.models.generate_content(
-            model='gemini-2.0-flash-exp',
+            model='gemini-2.5-flash',
             contents=prompt
         )
 

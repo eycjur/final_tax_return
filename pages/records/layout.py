@@ -54,20 +54,10 @@ def layout():
 
         dbc.Row([
             dbc.Col([
-                dbc.ButtonGroup([
-                    dbc.Button([
-                        html.I(className="fas fa-edit me-1"),
-                        "編集"
-                    ], id="btn-edit-selected", color="primary", outline=True, size="sm"),
-                    dbc.Button([
-                        html.I(className="fas fa-copy me-1"),
-                        "複製"
-                    ], id="btn-duplicate-selected", color="info", outline=True, size="sm"),
-                    dbc.Button([
-                        html.I(className="fas fa-trash me-1"),
-                        "削除"
-                    ], id="btn-delete-selected", color="danger", outline=True, size="sm"),
-                ], className="mb-3")
+                dbc.Button([
+                    html.I(className="fas fa-trash me-1"),
+                    "選択した記録を削除"
+                ], id="btn-delete-selected", color="danger", outline=True, size="sm", className="mb-3")
             ])
         ]),
 
@@ -103,7 +93,8 @@ def layout():
                     style_cell={
                         'textAlign': 'left',
                         'padding': '12px',
-                        'fontSize': '14px'
+                        'fontSize': '14px',
+                        'cursor': 'pointer'
                     },
                     style_header={
                         'backgroundColor': '#f1f5f9',
@@ -136,6 +127,10 @@ def get_form_modal():
         dbc.ModalHeader(dbc.ModalTitle(id="modal-title")),
         dbc.ModalBody(id="modal-body"),
         dbc.ModalFooter([
+            dbc.Button([
+                html.I(className="fas fa-copy me-2"),
+                "複製"
+            ], id="btn-duplicate", color="info", outline=True, className="me-2"),
             dbc.Button([
                 html.I(className="fas fa-save me-2"),
                 "保存"

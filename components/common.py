@@ -7,7 +7,7 @@ from dash import html
 from utils import calculations as calc
 
 CURRENT_YEAR = datetime.now().year
-YEARS = list(range(CURRENT_YEAR - 5, CURRENT_YEAR + 2))
+YEARS = list(range(2025, CURRENT_YEAR + 1))
 
 
 def get_year_selector(year_id: str):
@@ -30,7 +30,7 @@ def create_summary_cards(summary: dict):
                     html.Div("収入合計", className="label")
                 ], className="summary-card income")
             ])
-        ], md=3),
+        ], md=4),
         dbc.Col([
             dbc.Card([
                 html.Div([
@@ -38,7 +38,7 @@ def create_summary_cards(summary: dict):
                     html.Div("経費合計", className="label")
                 ], className="summary-card expense")
             ])
-        ], md=3),
+        ], md=4),
         dbc.Col([
             dbc.Card([
                 html.Div([
@@ -46,13 +46,5 @@ def create_summary_cards(summary: dict):
                     html.Div("所得金額", className="label")
                 ], className="summary-card net")
             ])
-        ], md=3),
-        dbc.Col([
-            dbc.Card([
-                html.Div([
-                    html.Div(calc.format_currency(summary['total_withholding']), className="value"),
-                    html.Div("源泉徴収額", className="label")
-                ], className="summary-card")
-            ])
-        ], md=3),
+        ], md=4),
     ], className="mb-4")

@@ -46,10 +46,16 @@ Supabaseを使用したマルチユーザー対応で、Google SSOによる認�
 
 Supabase Dashboard の **SQL Editor** で以下を実行:
 
-```bash
-# マイグレーションファイルの内容を実行
-supabase/migrations/001_initial_schema.sql
-```
+```sql
+-- 1. 初期スキーマの作成
+-- supabase/migrations/001_initial_schema.sql の内容を実行
+
+-- 2. 所在地フィールドの追加（既存データがある場合）
+-- supabase/migrations/002_add_client_address.sql の内容を実行
+
+-- 注意: 業務該当（is_business）はデータベースに保存せず、
+--       レポート画面で表示時に自動計算されます。
+--       そのため、003_add_is_business.sql は実行不要です。
 
 ### 3. Google OAuth の設定
 
@@ -179,6 +185,86 @@ final_tax_return/
 - 確定申告時に「レポート」画面で集計を確認
 - CSVダウンロードで確定申告書への転記に利用
 - 添付ファイル一括ダウンロードで証跡を保管
+
+## デプロイ
+
+### Google Cloud Run へのデプロイ
+
+このアプリケーションは Google Cloud Run にデプロイできます。
+
+#### 1. 事前準備
+
+```bash
+# Google Cloud SDK のインストール
+# https://cloud.google.com/sdk/docs/install
+
+# 認証とプロジェクト設定
+gcloud auth login
+gcloud config set project YOUR_PROJECT_ID
+```
+
+#### 2. 環境変数の設定
+
+`.env` ファイルに以下を追加:
+
+```bash
+# Google Cloud プロジェクトID
+GCP_PROJECT_ID=your-project-id
+```
+
+#### 3. デプロイ実行
+
+```bash
+# デプロイスクリプトを実行
+chmod +x scripts/deploy.sh
+./scripts/deploy.sh
+```
+
+または、手動でデプロイ:
+
+```bash
+gcloud run deploy final-tax-return \
+    --project YOUR_PROJECT_ID \
+    --source . \
+    --region asia-northeast1 \
+    --allow-unauthenticated \
+    --memory 512Mi \
+    --cpu 1 \
+    --min-instances 0 \
+    --max-instances 1 \
+    --timeout 300 \
+    --set-env-vars "SUPABASE_URL=$SUPABASE_URL" \
+    --set-env-vars "SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY" \
+    --set-env-vars "AUTH_ENABLED=$AUTH_ENABLED" \
+    --set-env-vars "GEMINI_API_KEY=$GEMINI_API_KEY"
+```
+
+#### 4. デプロイ後の確認
+
+デプロイが完了すると、Cloud Run の URL が表示されます。その URL にアクセスしてアプリケーションが正常に動作するか確認してください。
+
+### その他のデプロイ方法
+
+#### Docker を使用したデプロイ
+
+```bash
+# Dockerイメージのビルド
+docker build -t final-tax-return .
+
+# ローカルで実行
+docker run -p 8080:8080 \
+    -e SUPABASE_URL=your-url \
+    -e SUPABASE_ANON_KEY=your-key \
+    -e AUTH_ENABLED=true \
+    -e GEMINI_API_KEY=your-key \
+    final-tax-return
+```
+
+#### その他のプラットフォーム
+
+- **Heroku**: `Procfile` を追加して `gunicorn index:server` を実行
+- **Railway**: Dockerfile を使用
+- **Fly.io**: `fly.toml` を設定してデプロイ
 
 ## 開発
 
